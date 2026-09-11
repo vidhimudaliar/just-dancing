@@ -1,0 +1,500 @@
+:root {
+  --bg: #0b0d14;
+  --panel: #151926;
+  --panel-2: #1d2233;
+  --border: #2a3145;
+  --text: #e8ecf5;
+  --muted: #8b94ab;
+  --accent: #7c5cff;
+  --perfect: #4ade80;
+  --good: #38bdf8;
+  --ok: #fbbf24;
+  --oops: #f87171;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+button {
+  font: inherit;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 11px 20px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #8f74ff;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text);
+}
+
+button.ghost:hover {
+  background: var(--panel-2);
+}
+
+button.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- layout ---------- */
+
+.screen {
+  min-height: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.screen-header h1 {
+  margin: 0 0 6px;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+}
+
+.subtle {
+  color: var(--muted);
+  margin: 0;
+}
+
+.note {
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.banner.bad {
+  border-color: var(--oops);
+  color: var(--oops);
+}
+
+/* ---------- setup ---------- */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 64px 24px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: var(--accent);
+  background: rgba(124, 92, 255, 0.06);
+}
+
+/* ---------- video stages ---------- */
+
+.preview-stage,
+.webcam-pane,
+.reference-pane {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.preview-stage {
+  aspect-ratio: 4 / 3;
+}
+
+.preview-video,
+.reference-video {
+  position: absolute;
+  inset: 0;
+}
+
+.preview-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.stage-message {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--muted);
+}
+
+.stage-message.error {
+  color: var(--oops);
+}
+
+/* ---------- framing ---------- */
+
+.mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.mode-banner.good {
+  border-color: var(--perfect);
+}
+.mode-banner.warn {
+  border-color: var(--ok);
+}
+.mode-banner.bad {
+  border-color: var(--oops);
+}
+
+.mode-label {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.mode-banner.good .mode-label {
+  color: var(--perfect);
+}
+.mode-banner.warn .mode-label {
+  color: var(--ok);
+}
+.mode-banner.bad .mode-label {
+  color: var(--oops);
+}
+
+.mode-message {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---------- play ---------- */
+
+.screen.play {
+  max-width: 1400px;
+}
+
+.play-stage {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.reference-pane {
+  aspect-ratio: 16 / 9;
+}
+
+.webcam-pane {
+  aspect-ratio: 4 / 3;
+}
+
+.warmup-badge {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  background: rgba(11, 13, 20, 0.88);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.warmup-badge span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rating-callout {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+  pointer-events: none;
+}
+
+.rating-callout.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.rating-callout.perfect,
+.tally-item.perfect,
+.breakdown-row.perfect .breakdown-rating {
+  color: var(--perfect);
+}
+.rating-callout.good,
+.tally-item.good,
+.breakdown-row.good .breakdown-rating {
+  color: var(--good);
+}
+.rating-callout.ok,
+.tally-item.ok,
+.breakdown-row.ok .breakdown-rating {
+  color: var(--ok);
+}
+.rating-callout.oops,
+.tally-item.oops,
+.breakdown-row.oops .breakdown-rating {
+  color: var(--oops);
+}
+
+/* ---------- hud ---------- */
+
+.hud {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.score-bar {
+  height: 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--good));
+  /* Eases the discreteness of checkpoint scoring into something continuous. */
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.score-value {
+  font-size: 26px;
+  font-weight: 700;
+  min-width: 74px;
+}
+
+.tally {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.tally-item b {
+  color: inherit;
+}
+
+.hud-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- debug ---------- */
+
+.debug-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.debug-stat {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+
+.debug-label {
+  color: var(--muted);
+}
+
+/* ---------- results ---------- */
+
+.screen.results {
+  max-width: 560px;
+  text-align: center;
+}
+
+.screen.results .actions {
+  justify-content: center;
+}
+
+.final-score {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+}
+
+.final-percent {
+  font-size: 88px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  background: linear-gradient(180deg, var(--text), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.final-unit {
+  font-size: 28px;
+  color: var(--muted);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.breakdown-rating {
+  font-weight: 600;
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 900px) {
+  .play-stage {
+    grid-template-columns: 1fr;
+  }
+}
+
+.calibration-note {
+  font-size: 12.5px;
+  margin: 0;
+}
+
+.cache-badge {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(11, 13, 20, 0.85);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+/* ---------- url input ---------- */
+
+.url-row {
+  display: flex;
+  gap: 10px;
+}
+
+.url-input {
+  flex: 1;
+  font: inherit;
+  padding: 11px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
