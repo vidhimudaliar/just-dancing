@@ -79,6 +79,12 @@ export function PlayScreen({
       <div className="play-stage">
         <div className="reference-pane">
           <div ref={referenceContainerRef} className="reference-video" />
+          {phase === 'waiting' && (
+            <div className="warmup-badge">
+              <strong>Waiting for the routine…</strong>
+              <span>Scoring starts once the dancer does. Skip any intro if you like.</span>
+            </div>
+          )}
           {phase === 'calibrating' && (
             <div className="warmup-badge">
               <strong>Warming up…</strong>
@@ -192,7 +198,19 @@ function CalibrationNote({
   calibration: CalibrationResult;
   overridden: boolean;
 }) {
-  const { lag, mirror, orientation } = calibration;
+  const { lag, mirror, orientation, routineStart } = calibration;
+
+  // When the routine was never detected starting, both estimates below were
+  // measured over whatever happened to be on screen. Say so instead of
+  // reporting them as findings.
+  if (routineStart.timedOut) {
+    return (
+      <p className="calibration-note subtle">
+        Couldn’t tell where the routine starts, so timing and mirroring are guesses.
+        If everything scores as Oops, try “Flip sides”.
+      </p>
+    );
+  }
 
   const lagText = lag.confident
     ? `You're about ${Math.round(lag.lagMs)}ms behind — accounted for.`

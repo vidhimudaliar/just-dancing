@@ -84,6 +84,29 @@ export const CHECKPOINTS = {
 export const CALIBRATION = {
   /** Length of the warm-up window where scoring is suppressed (spec §7.2). */
   durationMs: 10_000,
+
+  /**
+   * Routine-start detection.
+   *
+   * Spec §7.2 calibrates over "the first ~10 seconds", assuming t=0 is the song
+   * start. Spec §11.3 only got as far as pre-roll *ads*. But plenty of Just
+   * Dance uploads open with in-game footage — someone navigating menus to pick
+   * the song — so the first 10s of video is often nobody dancing. Calibrating
+   * there measures the lag and mirror of a menu screen.
+   *
+   * So the warm-up window is anchored to sustained movement in the reference,
+   * not to t=0.
+   */
+
+  /** Reference movement (mean degrees per ms) that counts as dancing. */
+  routineMovementThreshold: 0.03,
+  /** Cumulative moving time that confirms the routine has actually begun. */
+  routineConfirmMs: 1500,
+  /**
+   * Give up waiting and calibrate anyway. A long intro costs less than never
+   * scoring, and the readout says when this fallback was used.
+   */
+  routineMaxWaitMs: 90_000,
   /** Cross-correlation search range for user reaction lag (spec §7.2). */
   lagMinMs: 0,
   lagMaxMs: 800,

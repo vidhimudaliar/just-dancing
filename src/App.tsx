@@ -9,7 +9,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Session, type SessionDebugInfo, type SessionPhase } from './game/session';
+import {
+  Session,
+  type RoutineStartInfo,
+  type SessionDebugInfo,
+  type SessionPhase,
+} from './game/session';
 import { estimateLag, type LagEstimate } from './calibration/lag';
 import { detectMirror, type MirrorEstimate } from './calibration/mirrorDetect';
 import { createVelocityMinimaDetector } from './checkpoints/velocityMinima';
@@ -42,6 +47,8 @@ export interface CalibrationResult {
   mirror: MirrorEstimate;
   /** What was actually applied, after any manual override. */
   orientation: Orientation;
+  /** Where the warm-up window was anchored, and whether that was a guess. */
+  routineStart: RoutineStartInfo;
 }
 
 const EMPTY_TOTALS: ScoreTotals = {
@@ -307,7 +314,7 @@ export function App() {
           onReferenceFrame: (frame) => {
             if (frame) sawReferenceRef.current = true;
           },
-          onCalibrationComplete: (referenceFrames, userFrames) => {
+          onCalibrationComplete: (referenceFrames, userFrames, info) => {
             const lag = estimateLag(referenceFrames, userFrames);
             // Mirror detection uses the lag estimate so that each reference pose
             // is compared against what the user was doing when they actually
@@ -318,7 +325,7 @@ export function App() {
             const orientation = overrideRef.current ?? mirror.orientation;
 
             sessionRef.current?.applyCalibration(lag.lagMs, orientation);
-            setCalibration({ lag, mirror, orientation });
+            setCalibration({ lag, mirror, orientation, routineStart: info });
           },
           onScored: (scored, next) => {
             setLastScored(scored);

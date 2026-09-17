@@ -13,14 +13,32 @@ import { createDetector, type PoseDetectorHandle } from '../pose/detector';
 import { FramingTracker, type FramingAssessment } from '../calibration/framing';
 import { PoseBuffer } from '../scoring/poseBuffer';
 import { ScoringEngine, type ScoreTotals } from '../scoring/engine';
-import { CALIBRATION, DETECTION } from '../tuning';
+import { angleVelocity } from '../calibration/lag';
+import { CALIBRATION, CONFIDENCE, DETECTION } from '../tuning';
 import type { CheckpointDetector } from '../checkpoints/types';
 import type { Orientation } from '../pose/mirror';
 import type { ReferenceSource } from '../sources/types';
 import type { WebcamHandle } from '../sources/webcam';
 import type { Checkpoint, PoseFrame, ScoredCheckpoint, ScoringMode } from '../pose/types';
 
-export type SessionPhase = 'idle' | 'calibrating' | 'scoring' | 'finished';
+/**
+ * `waiting` covers the stretch before the routine has actually begun — menu
+ * navigation, title cards, whatever the uploader put in front of the song.
+ * Calibrating through that would measure the timing of a static screen.
+ */
+export type SessionPhase = 'idle' | 'waiting' | 'calibrating' | 'scoring' | 'finished';
+
+export interface RoutineStartInfo {
+  /** Video time the warm-up window was anchored to. */
+  startedAt: number;
+  /**
+   * True when the routine was never detected starting and calibration was
+   * forced by the timeout — the estimates that follow are correspondingly
+   * unreliable, and the user should be told rather than shown a confident
+   * number.
+   */
+  timedOut: boolean;
+}
 
 export interface SessionCallbacks {
   onScored?(scored: ScoredCheckpoint, totals: ScoreTotals): void;
@@ -28,7 +46,11 @@ export interface SessionCallbacks {
   onReferenceFrame?(frame: PoseFrame | null): void;
   onPhaseChange?(phase: SessionPhase): void;
   /** Fires once the warm-up window closes, carrying the frames gathered during it. */
-  onCalibrationComplete?(referenceFrames: PoseFrame[], userFrames: PoseFrame[]): void;
+  onCalibrationComplete?(
+    referenceFrames: PoseFrame[],
+    userFrames: PoseFrame[],
+    info: RoutineStartInfo,
+  ): void;
   onFinished?(totals: ScoreTotals, checkpoints: Checkpoint[]): void;
 }
 
@@ -69,6 +91,18 @@ export class Session {
   private lastFrameWall = 0;
   private loopFpsEma = 0;
 
+  /** Video time at which the routine was judged to have started. */
+  private routineStartedAt: number | null = null;
+  /** True when that judgement was the timeout rather than detected movement. */
+  private routineStartTimedOut = false;
+  /** Running total of time the reference has been moving, for start detection. */
+  private movingMs = 0;
+  /** Previous reference frame, kept separately from the checkpoint detector's. */
+  private lastReferenceFrame: PoseFrame | null = null;
+  /** Cached checkpoints rendered as pose frames, for calibration on cached runs. */
+  private readonly cachedFrames: PoseFrame[] = [];
+  private cachedFrameCursor = 0;
+
   /** Every checkpoint seen this run, for persisting to cache on a clean finish. */
   private readonly collected: Checkpoint[] = [];
   /** Reference poses during the warm-up window, for lag and mirror estimation. */
@@ -88,6 +122,16 @@ export class Session {
       for (const checkpoint of options.cachedCheckpoints) {
         this.collected.push(checkpoint);
         this.engine.addCheckpoint(checkpoint);
+        // Cached checkpoints double as a sparse reference pose stream. Without
+        // this a cached run has no reference frames at all, so mirror detection
+        // silently gets zero samples and every routine is scored unmirrored.
+        this.cachedFrames.push({
+          t: checkpoint.t,
+          keypoints: {},
+          angles: checkpoint.angles,
+          confidence: {},
+          meanScore: checkpoint.confidence,
+        });
       }
     }
   }
@@ -110,7 +154,7 @@ export class Session {
 
     await this.options.reference.play();
 
-    this.setPhase(this.options.skipCalibration ? 'scoring' : 'calibrating');
+    this.setPhase(this.options.skipCalibration ? 'scoring' : 'waiting');
     this.lastFrameWall = performance.now();
     this.loop();
   }
@@ -141,6 +185,7 @@ export class Session {
 
     await this.stepWebcam(now);
     await this.stepReference(now);
+    this.stepCachedReference(now);
     this.stepCalibration(now);
     this.stepScoring(now);
 
@@ -181,6 +226,13 @@ export class Session {
     this.options.callbacks?.onReferenceFrame?.(frame);
     if (!frame) return;
 
+    if (this.phase === 'waiting') {
+      if (this.detectRoutineStart(frame)) this.beginCalibration(now, false);
+      // Nothing before the routine starts is worth keeping: checkpoints
+      // extracted from a menu screen would be scored against the dancer later.
+      return;
+    }
+
     if (this.phase === 'calibrating') this.calibrationReference.push(frame);
 
     for (const checkpoint of this.options.checkpointDetector.push(frame)) {
@@ -190,14 +242,93 @@ export class Session {
   }
 
   /**
+   * Decides whether the reference has started actually dancing.
+   *
+   * Requires a confidently detected body *and* sustained movement. Either alone
+   * is not enough: a game menu can show a standing avatar, and detector jitter
+   * on a static frame produces small non-zero velocities. Movement time
+   * accumulates and decays rather than resetting hard, so a held pose partway
+   * through the opening phrase doesn't send it back to the start.
+   */
+  private detectRoutineStart(frame: PoseFrame): boolean {
+    const previous = this.lastReferenceFrame;
+    this.lastReferenceFrame = frame;
+    if (!previous) return false;
+
+    const dt = frame.t - previous.t;
+    if (dt <= 0) return false;
+
+    if (frame.meanScore < CONFIDENCE.checkpoint) {
+      this.movingMs = 0;
+      return false;
+    }
+
+    const velocity = angleVelocity(previous, frame);
+    if (velocity === null) return false;
+
+    this.movingMs =
+      velocity >= CALIBRATION.routineMovementThreshold
+        ? this.movingMs + dt
+        : Math.max(0, this.movingMs - dt);
+
+    return this.movingMs >= CALIBRATION.routineConfirmMs;
+  }
+
+  /**
+   * The cached-run equivalent of routine-start detection.
+   *
+   * With checkpoints already extracted there is no reference detector running,
+   * so there's nothing to watch for movement — but the checkpoints themselves
+   * carry the answer: the first one marks where the routine begins, since the
+   * extraction run found nothing to score before that.
+   */
+  private stepCachedReference(now: number): void {
+    const first = this.cachedFrames[0];
+    if (!this.usingCache || !first) return;
+
+    if (this.phase === 'waiting') {
+      if (now >= first.t) this.beginCalibration(first.t, false);
+      return;
+    }
+    if (this.phase !== 'calibrating') return;
+
+    while (this.cachedFrameCursor < this.cachedFrames.length) {
+      const frame = this.cachedFrames[this.cachedFrameCursor]!;
+      if (frame.t > now) break;
+      this.calibrationReference.push(frame);
+      this.cachedFrameCursor += 1;
+    }
+  }
+
+  /** Opens the warm-up window, anchored at the moment the routine began. */
+  private beginCalibration(now: number, timedOut: boolean): void {
+    this.routineStartedAt = now;
+    this.routineStartTimedOut = timedOut;
+    this.setPhase('calibrating');
+  }
+
+  /**
    * Ends the warm-up window. Scoring stays suppressed until this fires, so the
    * user isn't penalised for the seconds spent working out their own lag.
    */
   private stepCalibration(now: number): void {
-    if (this.phase !== 'calibrating') return;
-    if (now < CALIBRATION.durationMs) return;
+    if (this.phase === 'waiting') {
+      // Safety valve: a reference the detector can never read would otherwise
+      // hold the session in `waiting` for the whole song.
+      if (now >= CALIBRATION.routineMaxWaitMs) this.beginCalibration(now, true);
+      return;
+    }
 
-    this.options.callbacks?.onCalibrationComplete?.(this.calibrationReference, this.calibrationUser);
+    if (this.phase !== 'calibrating') return;
+
+    const startedAt = this.routineStartedAt ?? 0;
+    if (now - startedAt < CALIBRATION.durationMs) return;
+
+    this.options.callbacks?.onCalibrationComplete?.(
+      this.calibrationReference,
+      this.calibrationUser,
+      { startedAt, timedOut: this.routineStartTimedOut },
+    );
     this.setPhase('scoring');
   }
 
