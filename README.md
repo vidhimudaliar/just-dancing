@@ -9,13 +9,22 @@ Multi-person (M7 / spec §10) is not included.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 99 unit tests
+npm test         # 105 unit tests
 npm run build
 ```
 
 Desktop Chrome. The camera needs permission; the YouTube path also needs a tab
 share. Nothing is recorded or uploaded — only derived joint angles ever leave the
-detector, and they stay in IndexedDB on this machine.
+detector, and they stay in IndexedDB on this machine. The camera is released the
+moment the results screen appears, so the indicator light goes out rather than
+staying lit behind your score.
+
+> **Status: built, not yet verified end to end.** All six milestones are
+> implemented, the unit tests pass, and it typechecks and builds — but no
+> complete successful play-through has been confirmed by anyone. Every tuning
+> constant is still a first guess (spec §7.5 expects several rounds of real
+> dancing). Treat the verification checklist below as outstanding work, not as a
+> record of what passed.
 
 ## How it works
 
@@ -79,9 +88,36 @@ precisely so checkpoint counts can differ.
 extracting, so the second play of a song never prompts for screen sharing and runs
 only one detector — spec §4's main practical win.
 
-**Only a run that reaches the end is cached.** Spec §12 left this open. A partial
-extraction would poison every future play of the song with a routine that stops
-halfway.
+**Caching requires checkpoint density, not just reaching the end.** Spec §12 left
+the retry question open. "Did the run finish?" turns out to be the wrong test —
+seeking forward also reaches the end, with the middle never extracted, which
+silently saved a 7-checkpoint fragment as a complete 3:47 routine. A run must
+average at least 0.5 checkpoints per second to be stored, and the results screen
+says when one wasn't. That threshold also catches a reference the detector
+couldn't read, without needing to tell the two cases apart.
+
+**Calibration is anchored to the routine, not to video t=0.** Spec §7.2
+calibrates over "the first ~10 seconds"; §11.3 got as far as pre-roll *ads* but
+conflated "playback started" with "the song started." Many Just Dance uploads
+open with in-game footage of someone navigating menus, so those ten seconds are
+often nobody dancing — lag estimation falls back to its default and mirror
+detection gets *zero* samples, silently scoring a mirrored routine unmirrored for
+the whole song. A `waiting` phase now holds until the reference shows a
+confidently detected body **and** 1.5s of sustained movement. Both are required:
+a menu can show a standing avatar, and detector jitter on a static frame produces
+small non-zero velocities.
+
+**The MoveNet model is vendored, not fetched.** `@tensorflow-models/pose-detection`
+defaults to `tfhub.dev`, which now redirects to Kaggle and returns an HTML error
+page instead of the model — the library's default is simply broken. Kaggle serves
+it only as a tar.gz that tfjs can't consume, so the extracted `model.json` and its
+two weight shards live in `public/models/` (4.6MB). To refresh them:
+
+```bash
+curl -L -o model.tar.gz \
+  "https://www.kaggle.com/models/google/movenet/TfJs/singlepose-lightning/4/download?tfjs-format=file"
+tar xzf model.tar.gz -C public/models/movenet-singlepose-lightning
+```
 
 ## Feedback latency — a deliberate stance
 
@@ -114,20 +150,39 @@ bucket thresholds.
 ## Verifying it end to end
 
 Unit tests cover the pure logic (angles, mirroring, comparison, lag recovery,
-minima detection, URL parsing). The rest needs a camera and a body:
+minima detection, routine-start thresholds, URL parsing). The rest needs a camera
+and a body, and **none of it has been done yet**:
 
-1. Load a local video, dance a chorus. Dance well, then badly, then stand still —
-   the three runs should separate clearly.
+**Start here — one run exercises most of the risk.** Paste a routine with a
+*human* dancer, stand back far enough that your knees are in frame, and play it
+straight through without skipping. That single pass covers the model loading,
+routine-start detection, lag, mirroring, checkpoint density, the cache write and
+the camera release. If it finishes with a plausible score and the results screen
+doesn't say it skipped caching, the pipeline works.
+
+Then, individually:
+
+1. Load a local video and dance a chorus three times: well, deliberately badly,
+   then standing still. The three should separate clearly. If they don't, the
+   scoring is wrong regardless of everything else.
 2. On the framing screen, step forward until your knees drop out. The mode should
    flip to UPPER BODY and renormalize rather than tanking your score.
 3. Dance a section deliberately mirrored and confirm calibration locks the right
    orientation. Then hit **Flip sides** and confirm the score drops — that's the
    proof detection is doing real work.
-4. Paste `https://www.youtube.com/watch?v=WCDRkTDtsFM`, share this tab, and
-   confirm `t=0` lands on the song start rather than on a pre-roll ad.
-5. Play the same video twice. The second run should show "Using saved moves" and
-   never ask for screen sharing.
-6. Cancel the screen-share prompt on purpose, and separately share the *wrong*
+4. Use a video that opens with menu navigation. It should sit on **"Waiting for
+   the routine…"** through the intro and only then warm up — not calibrate
+   against a static screen.
+5. Paste `https://www.youtube.com/watch?v=WCDRkTDtsFM`, share this tab, and
+   confirm scoring starts at the song rather than during a pre-roll ad.
+6. Play the same video twice. The second run should show "Using saved moves",
+   never ask for screen sharing, and still calibrate — cached runs derive the
+   routine start from the first cached checkpoint.
+7. Fast-forward through a run on purpose. The results screen should say it wasn't
+   saved, and the next play should re-extract rather than reusing a fragment.
+8. Confirm the camera indicator goes out when the results screen appears, and
+   that **Dance again** reacquires it.
+9. Cancel the screen-share prompt on purpose, and separately share the *wrong*
    tab — both should give a clear recovery path, not a dead end.
 
 **Watch the Debug panel during a full song.** Two concurrent MoveNet instances is
@@ -142,5 +197,21 @@ detection to 10fps.
   scores well. Spec §7.7 accepts this deliberately; real Just Dance has the same
   weakness.
 - Region Capture is Chrome-only. The fallback works, but V1 is desktop-Chrome-first.
-- The MoveNet model is fetched from Google's host on first load, so the very first
-  run needs a network connection.
+- The framing gate can pass a seated head-and-shoulders view, where MoveNet
+  misplaces the shoulders because it expects to see a body. Known, unfixed.
+
+## Open questions
+
+**Can MoveNet read stylized dancers?** Many Just Dance routines feature costumed
+mascots rather than human dancers — `WCDRkTDtsFM` ("Timber") is a cartoon panda
+with an oversized head and non-human proportions. MoveNet is trained on human
+bodies, so those routines may not be detectable at all, which would narrow the
+paste-any-link premise to human-dancer uploads. The spec never considered this:
+§2 worried about whether the pixels could be *reached*, never about whether
+what's in them is human-shaped.
+
+**Genuinely untested.** It was raised off a run that turned out to be truncated,
+so nothing so far is evidence either way. To settle it: play a mascot routine
+straight through, then a human-dancer routine, and compare checkpoint counts —
+the results screen reports when a run was too sparse to cache, which surfaces the
+answer directly.
