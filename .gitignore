@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.local
 media/
+
+# Written by `tsc -b` on every build, including `npm run build`.
+*.tsbuildinfo
