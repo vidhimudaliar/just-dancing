@@ -15,6 +15,21 @@ import '@tensorflow/tfjs-backend-webgl';
 import { computeAngles, meanKeypointScore } from './angles';
 import type { FrameSource, KeypointMap, KeypointName, PoseFrame } from './types';
 
+/**
+ * The MoveNet weights, served from this app rather than fetched from the
+ * internet.
+ *
+ * The library's default points at `tfhub.dev`, which now redirects to Kaggle and
+ * answers with an HTML error page instead of the model — so the default is
+ * simply broken, and the app would fail at "Loading pose model…". Kaggle serves
+ * the real thing only as a tar.gz, which tfjs can't consume directly, so the
+ * extracted `model.json` and its weight shards live in `public/models/`.
+ *
+ * Vendoring also means first load doesn't depend on a third party being up, and
+ * the app works offline after the initial page load.
+ */
+const MODEL_URL = `${import.meta.env.BASE_URL}models/movenet-singlepose-lightning/model.json`;
+
 let backendReady: Promise<void> | null = null;
 
 /** Initializes the WebGL backend once, no matter how many detectors are created. */
@@ -48,6 +63,7 @@ export async function createDetector(label: string): Promise<PoseDetectorHandle>
   const detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
     modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
     enableSmoothing: true,
+    modelUrl: MODEL_URL,
   });
 
   let inferenceEma = 0;

@@ -20,7 +20,7 @@ import { startDisplayCapture, DisplayCaptureError } from './sources/displayCaptu
 import { createYouTubeSource } from './sources/youtubeIframe';
 import { createYouTubeReference } from './sources/youtubeReference';
 import { startWebcam, WebcamError, type WebcamHandle } from './sources/webcam';
-import { CALIBRATION, DETECTION } from './tuning';
+import { CALIBRATION, CHECKPOINTS, DETECTION } from './tuning';
 import { FramingScreen } from './ui/FramingScreen';
 import { PlayScreen } from './ui/PlayScreen';
 import { ResultsScreen } from './ui/ResultsScreen';
@@ -82,6 +82,9 @@ export function App() {
   const [calibration, setCalibration] = useState<CalibrationResult | null>(null);
   const [usingCache, setUsingCache] = useState(false);
   const [captureProblem, setCaptureProblem] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  /** Set when a finished run was too sparse to be worth caching. */
+  const [cacheSkipped, setCacheSkipped] = useState<string | null>(null);
 
   /**
    * Manual mirror override (spec §7.3), for when auto-detection guesses wrong.
@@ -119,6 +122,23 @@ export function App() {
     setWebcam(null);
   }, []);
 
+  /**
+   * Acquires the camera, releasing any handle already held first.
+   *
+   * Every path that starts a camera goes through here. Calling `startWebcam`
+   * directly would strand the previous MediaStream — its tracks stay live and
+   * the indicator light stays on — whenever one is somehow still open.
+   */
+  const acquireWebcam = useCallback(async (): Promise<WebcamHandle> => {
+    webcamRef.current?.dispose();
+    webcamRef.current = null;
+
+    const handle = await startWebcam();
+    webcamRef.current = handle;
+    setWebcam(handle);
+    return handle;
+  }, []);
+
   // Nothing holding hardware may outlive the app.
   useEffect(() => {
     return () => {
@@ -136,9 +156,7 @@ export function App() {
     try {
       // Ask for the camera before showing the framing screen, so a denial
       // surfaces here rather than as an empty preview.
-      const handle = await startWebcam();
-      webcamRef.current = handle;
-      setWebcam(handle);
+      await acquireWebcam();
       setSelection(picked);
       setScreen('framing');
     } catch (err) {
@@ -149,7 +167,7 @@ export function App() {
       setBusy(false);
       setBusyMessage(undefined);
     }
-  }, []);
+  }, [acquireWebcam]);
 
   const handlePickFile = useCallback(
     (picked: File) => {
@@ -310,13 +328,29 @@ export function App() {
             setTotals(finalTotals);
             setScreen('results');
 
-            // Persist only on a run that actually reached the end — a partial
-            // extraction would poison every future play of this song.
-            if (!cached && checkpoints.length > 0) {
+            // Reaching the end of the song is not enough to justify caching:
+            // skipping ahead also reaches the end, with the middle never
+            // extracted. Require the checkpoints to be dense enough to describe
+            // the whole routine, or the next play would score against a version
+            // of the song with most of it missing.
+            const durationMs = source.clock.durationMs;
+            const density =
+              durationMs > 0 ? checkpoints.length / (durationMs / 1000) : 0;
+            const worthCaching = density >= CHECKPOINTS.minCacheDensityPerSecond;
+
+            if (!cached && !worthCaching) {
+              setCacheSkipped(
+                `Not saving this routine — only ${checkpoints.length} checkpoints across ${Math.round(
+                  durationMs / 1000,
+                )}s. Play it through without skipping to save it.`,
+              );
+            }
+
+            if (!cached && worthCaching) {
               void saveCheckpoints({
                 cacheKey: source.cacheKey,
                 checkpoints,
-                durationMs: source.clock.durationMs,
+                durationMs,
                 sourceFps: DETECTION.referenceFps,
               });
             }
@@ -359,6 +393,19 @@ export function App() {
     return () => clearTimeout(timer);
   }, [screen, phase, usingCache, selection]);
 
+  /**
+   * Releases the camera as soon as scoring is over.
+   *
+   * The results screen has no use for it, and a camera indicator still lit while
+   * you're reading your score reads as the app continuing to watch you. Doing
+   * this in an effect rather than inside `onFinished` matters: `onFinished`
+   * fires *before* `Session.stop()`, so disposing there would pull the video
+   * element out from under an inference call still in flight.
+   */
+  useEffect(() => {
+    if (screen === 'results') disposeWebcam();
+  }, [screen, disposeWebcam]);
+
   // Poll the debug readout separately from the scoring loop, so rendering it
   // never competes with inference for frame budget.
   useEffect(() => {
@@ -390,10 +437,34 @@ export function App() {
     setCalibration((previous) => (previous ? { ...previous, orientation: next } : previous));
   }, [calibration]);
 
-  const playAgain = useCallback(() => {
+  /**
+   * Restarts the same routine.
+   *
+   * The camera was released when the results screen appeared, so it has to be
+   * reacquired before a session can start — `startSession` reads the handle and
+   * would otherwise bail silently, leaving the button looking broken. The
+   * browser remembers the permission for this origin, so this is a short delay
+   * rather than a second prompt.
+   */
+  const playAgain = useCallback(async () => {
+    if (!selection) return;
     teardownSession();
-    if (selection) void startSession(mode, selection);
-  }, [teardownSession, startSession, mode, selection]);
+
+    setRestarting(true);
+    try {
+      await acquireWebcam();
+    } catch (err) {
+      setError(
+        err instanceof WebcamError ? err.message : `Could not restart the camera: ${String(err)}`,
+      );
+      setScreen('setup');
+      return;
+    } finally {
+      setRestarting(false);
+    }
+
+    await startSession(mode, selection);
+  }, [teardownSession, startSession, acquireWebcam, mode, selection]);
 
   const newSong = useCallback(() => {
     teardownSession();
@@ -441,7 +512,9 @@ export function App() {
       <ResultsScreen
         totals={totals}
         title={selection?.title ?? ''}
-        onPlayAgain={playAgain}
+        restarting={restarting}
+        cacheSkipped={cacheSkipped}
+        onPlayAgain={() => void playAgain()}
         onNewSong={newSong}
       />
     );

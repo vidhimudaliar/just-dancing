@@ -66,6 +66,19 @@ export const CHECKPOINTS = {
   maxPerSecond: 4,
   /** Moving-average window for velocity smoothing, in frames (spec §6.1). */
   smoothingFrames: 5,
+  /**
+   * Checkpoints per second of video required before a run is worth caching.
+   *
+   * Reaching the end of the song isn't sufficient evidence that a routine was
+   * fully extracted: seeking forward also reaches the end, having skipped
+   * everything in between. Density catches that, and catches a reference the
+   * detector simply couldn't read, without needing to distinguish the two —
+   * both produce a checkpoint file that would wreck every future play.
+   *
+   * Velocity minima run 1–3/sec on real choreography; 0.5 is a floor that only
+   * a genuinely broken run falls below.
+   */
+  minCacheDensityPerSecond: 0.5,
 };
 
 export const CALIBRATION = {
@@ -104,8 +117,14 @@ export const DETECTION = {
 };
 
 export const CACHE = {
-  /** Bump to invalidate every stored checkpoint file. */
-  version: 1,
+  /**
+   * Bump to invalidate every stored checkpoint file.
+   *
+   * v2: entries written before the density guard existed may have been saved
+   * from a run that skipped ahead, and would describe only a fragment of their
+   * routine. There's no way to tell those apart after the fact, so they all go.
+   */
+  version: 2,
   dbName: 'dance-scoring',
   storeName: 'checkpoints',
 };

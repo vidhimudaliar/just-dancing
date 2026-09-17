@@ -28,11 +28,22 @@ function verdict(percent: number): string {
 export interface ResultsScreenProps {
   totals: ScoreTotals;
   title: string;
+  /** True while the camera is being reacquired for another run. */
+  restarting: boolean;
+  /** Explains why this run wasn't saved for reuse, when it wasn't. */
+  cacheSkipped: string | null;
   onPlayAgain(): void;
   onNewSong(): void;
 }
 
-export function ResultsScreen({ totals, title, onPlayAgain, onNewSong }: ResultsScreenProps) {
+export function ResultsScreen({
+  totals,
+  title,
+  restarting,
+  cacheSkipped,
+  onPlayAgain,
+  onNewSong,
+}: ResultsScreenProps) {
   const scored = ORDER.reduce((sum, rating) => sum + totals.counts[rating], 0);
 
   return (
@@ -66,12 +77,18 @@ export function ResultsScreen({ totals, title, onPlayAgain, onNewSong }: Results
         )}
       </p>
 
+      {cacheSkipped && <p className="subtle note">{cacheSkipped}</p>}
+
+      {/* Confirms in words what the camera indicator shows: scoring is over and
+          the camera has been released, not left running behind the score. */}
+      <p className="subtle note">Camera off</p>
+
       <div className="actions">
-        <button className="ghost" onClick={onNewSong}>
+        <button className="ghost" onClick={onNewSong} disabled={restarting}>
           Different song
         </button>
-        <button className="primary" onClick={onPlayAgain}>
-          Dance again
+        <button className="primary" onClick={onPlayAgain} disabled={restarting}>
+          {restarting ? 'Starting camera…' : 'Dance again'}
         </button>
       </div>
     </div>
